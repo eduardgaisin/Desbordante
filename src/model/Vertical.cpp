@@ -1,108 +1,90 @@
-//
-// Created by kek on 17.07.19.
-//
-
-#include "Vertical.h"
-
 #include <iostream>
 #include <utility>
 
+#include "Vertical.h"
 
-
-using namespace std;
-
-Vertical::Vertical(shared_ptr<RelationalSchema> relSchema, dynamic_bitset<> const & indices) :
-    columnIndices(indices),
+Vertical::Vertical(RelationalSchema const* relSchema, boost::dynamic_bitset<> indices) :
+    columnIndices(std::move(indices)),
     schema(relSchema) {}
 
-Vertical::Vertical(Column & col) : schema(col.getSchema()){
+/*Vertical::Vertical(Column & col) : schema(col.getSchema()){
     columnIndices = dynamic_bitset<>(schema.lock()->getNumColumns());
     columnIndices.set(col.getIndex());
-}
+}*/
 
+bool Vertical::contains(Vertical &that) const {
+    boost::dynamic_bitset<>& thatIndices = that.columnIndices;
+    if (columnIndices.size() < thatIndices.size()) return false;
 
-//TODO: перепроверь цикл
-//TODO: перепроверь все операции с Джавой
-bool Vertical::contains(Vertical &that) {
-    dynamic_bitset<>& thisIndices = columnIndices;
-    dynamic_bitset<>& thatIndices = that.columnIndices;
-    if(thisIndices.size() < thatIndices.size()) return false;
-    for (unsigned long columnIndex = thatIndices.find_first(); columnIndex < thatIndices.size(); columnIndex = thatIndices.find_next(columnIndex)){
-        if (!(thisIndices[columnIndex])) return false;
+    for (size_t columnIndex = thatIndices.find_first();
+         columnIndex < thatIndices.size();
+         columnIndex = thatIndices.find_next(columnIndex)) {
+        if (!(columnIndices[columnIndex])) return false;
     }
     return true;
 }
 
-bool Vertical::intersects(Vertical &that) {
-    dynamic_bitset<>& thisIndices = columnIndices;
-    dynamic_bitset<>& thatIndices = that.columnIndices;
-    return thisIndices.intersects(thatIndices);
+bool Vertical::intersects(Vertical &that) const {
+    boost::dynamic_bitset<>& thatIndices = that.columnIndices;
+    return columnIndices.intersects(thatIndices);
 }
 
-std::shared_ptr<Vertical> Vertical::Union(Vertical const &that) {
-    dynamic_bitset<> retainedColumnIndices(columnIndices);
+Vertical Vertical::Union(Vertical const &that) const {
+    boost::dynamic_bitset<> retainedColumnIndices(columnIndices);
     retainedColumnIndices |= that.columnIndices;
-    return schema.lock()->getVertical(retainedColumnIndices);
+    return schema->getVertical(retainedColumnIndices);
 }
 
-std::shared_ptr<Vertical> Vertical::project(Vertical &that) {
-    dynamic_bitset<> retainedColumnIndices(columnIndices);
+Vertical Vertical::project(Vertical &that) const {
+    boost::dynamic_bitset<> retainedColumnIndices(columnIndices);
     retainedColumnIndices &= that.columnIndices;
-    return schema.lock()->getVertical(retainedColumnIndices);
+    return schema->getVertical(retainedColumnIndices);
 }
 
-//TODO: check
-std::shared_ptr<Vertical> Vertical::without(Vertical const & that) const {
-    dynamic_bitset<> retainedColumnIndices(columnIndices);
+Vertical Vertical::without(Vertical const & that) const {
+    boost::dynamic_bitset<> retainedColumnIndices(columnIndices);
     retainedColumnIndices &= ~that.columnIndices;
-    //retainedColumnIndices = ~retainedColumnIndices;
-    return schema.lock()->getVertical(retainedColumnIndices);
+    return schema->getVertical(retainedColumnIndices);
 }
 
-//TODO: UNUSED METHOD - CHECK ITS VALIDITY
-std::shared_ptr<Vertical> Vertical::invert() {
-    auto relation = schema.lock();
-    dynamic_bitset<> flippedIndices(columnIndices);
-    flippedIndices.resize(relation->getNumColumns());
+Vertical Vertical::invert() const {
+    boost::dynamic_bitset<> flippedIndices(columnIndices);
+    flippedIndices.resize(schema->getNumColumns());
     flippedIndices.flip();
-    return relation->getVertical(flippedIndices);
+    return schema->getVertical(flippedIndices);
 }
 
-std::shared_ptr<Vertical> Vertical::invert(Vertical &scope) {
-    dynamic_bitset<> flippedIndices(columnIndices);
+Vertical Vertical::invert(Vertical &scope) const {
+    boost::dynamic_bitset<> flippedIndices(columnIndices);
     flippedIndices ^= scope.columnIndices;
-    return schema.lock()->getVertical(flippedIndices);
+    return schema->getVertical(flippedIndices);
 }
 
-Vertical Vertical::emptyVertical(shared_ptr<RelationalSchema> relSchema) {
-    return Vertical(relSchema, dynamic_bitset<>(relSchema->getNumColumns()));
+std::unique_ptr<Vertical> Vertical::emptyVertical(RelationalSchema const* relSchema) {
+    return std::make_unique<Vertical>(relSchema, boost::dynamic_bitset<>(relSchema->getNumColumns()));
 }
 
-
-vector<shared_ptr<Column>> Vertical::getColumns() const {
-    //dynamic_bitset<> returnColumnIndices = getColumnIndices();
-    auto relation = schema.lock();
-    vector<shared_ptr<Column>> columns;
-    for (int index = columnIndices.find_first();
-         index != -1;//dynamic_bitset<>::npos;
+std::vector<Column const*> Vertical::getColumns() const {
+    std::vector<Column const*> columns;
+    for (size_t index = columnIndices.find_first();
+         index != boost::dynamic_bitset<>::npos;
          index = columnIndices.find_next(index)) {
-        columns.push_back(relation->getColumns()[index]);
+        columns.push_back(schema->getColumns()[index].get());
     }
     return columns;
 }
 
-string Vertical::toString() const {
-    string result = "[";
+std::string Vertical::toString() const {
+    std::string result = "[";
 
     if ((int)columnIndices.find_first() == -1)
         return "[]";
 
-    auto relation = schema.lock();
     for (size_t index = columnIndices.find_first();
-         index != dynamic_bitset<>::npos;
+         index != boost::dynamic_bitset<>::npos;
          index = columnIndices.find_next(index)) {
-        result += relation->getColumn(index)->getName();
-        if (columnIndices.find_next(index) != dynamic_bitset<>::npos) {
+        result += schema->getColumn(index)->getName();
+        if (columnIndices.find_next(index) != boost::dynamic_bitset<>::npos) {
             result += ' ';
         }
     }
@@ -112,16 +94,16 @@ string Vertical::toString() const {
     return result;
 }
 
-vector<shared_ptr<Vertical>> Vertical::getParents() {
-    if (getArity() < 2) return vector<shared_ptr<Vertical>>();
-    vector<shared_ptr<Vertical>> parents(getArity());
+std::vector<Vertical> Vertical::getParents() const {
+    if (getArity() < 2) return std::vector<Vertical>();
+    std::vector<Vertical> parents(getArity());
     int i = 0;
     for (size_t columnIndex = columnIndices.find_first();
-         columnIndex != dynamic_bitset<>::npos;
+         columnIndex != boost::dynamic_bitset<>::npos;
          columnIndex = columnIndices.find_next(columnIndex)) {
-        columnIndices.reset(columnIndex);
-        parents[i++] = getSchema()->getVertical(columnIndices);
-        columnIndices.set(columnIndex);
+        auto parentColumnIndices = columnIndices;
+        parentColumnIndices.reset(columnIndex);
+        parents[i++] = getSchema()->getVertical(std::move(parentColumnIndices));
     }
     return parents;
 }
