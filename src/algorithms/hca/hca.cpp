@@ -4,12 +4,24 @@
 
 #include "hca.h"
 
-unsigned long long algos::HCA::Execute() {
+// for fd mining
+#include "dfd.h"
+
+unsigned long long algos::HCA::ExecuteInternal() {
     // time
+    auto start_time = std::chrono::system_clock::now();
+
+    // find all fds
+
+    fds_algorithm_.reset(new DFD());
 
     // fds_map
     std::map<boost::dynamic_bitset<>, boost::dynamic_bitset<>> fds;
-    for (auto const& fd : pyro_fds_->FdList()) {
+    for (auto const& fd : fds_algorithm_->FdList()) {
+        for (auto& [lhs, rhs] : fds) {
+            fds[lhs | fd.GetLhs().GetColumnIndices()]
+                .set(fd.GetRhs().GetIndex());
+        }
         fds[fd.GetLhs().GetColumnIndices()].set(fd.GetRhs().GetIndex());
     }
 
@@ -22,6 +34,7 @@ unsigned long long algos::HCA::Execute() {
             RegisterUnique(Vertical(schema_, candidate));
         } else {
             non_uniques.push_back(candidate);
+            StoreHistogram(candidate);
         }
     }
     size_t max_k = non_uniques.size();
@@ -35,7 +48,10 @@ unsigned long long algos::HCA::Execute() {
                 continue;
             }
             auto const& candidate = k_candidates[candidate_index];
-            // TODO: IfPrunedByHistogram
+            if (IsPrunedByHistogram(candidate)) {
+                non_uniques.push_back(candidate);
+                continue;
+            }
             if (IsUnique(candidate)) {
                 RegisterUnique(Vertical(schema_, candidate));
                 for (size_t i = 0; i < k_candidates.size(); i++) {
@@ -49,13 +65,21 @@ unsigned long long algos::HCA::Execute() {
                 non_uniques.push_back(candidate);
                 for (size_t i = 0; i < k_candidates.size(); i++) {
                     auto const& k_candidate = k_candidates[i];
-                    if (fds[candidate] & k_can)
+                    if ((fds[candidate] & k_candidate) == k_candidate) {
+                        non_uniques.push_back(k_candidate);
+                        is_futile[i] = true;
+                    }
                 }
+                StoreHistogram(candidate);
             }
+
         }
     }
 
-    // time
+    // return time
+    auto elapsed_milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now() - start_time);
+    return elapsed_milliseconds.count();
 
 }
 
@@ -91,16 +115,28 @@ std::vector<boost::dynamic_bitset<>>
             }
         }
     }
+    return candidates;
 }
 
 bool algos::HCA::IsMinimal(boost::dynamic_bitset<> const& candidate) const {
-
+    for (auto const& unique : uniques_) {
+        if ((candidate & unique.GetColumnIndices()) == unique.GetColumnIndices()) {
+            return false;
+        }
+    }
+    return true;
 }
 
+// TODO
 bool algos::HCA::IsUnique(boost::dynamic_bitset<> const& candidate) const {
 
 }
 
-bool algos::HCA::IsFutile(boost::dynamic_bitset<> const& candidate) const {
+// TODO
+bool algos::HCA::IsPrunedByHistogram(boost::dynamic_bitset<> const& candidate) const {
+
+}
+
+void algos::HCA::StoreHistogram(boost::dynamic_bitset<> const& candidate) const {
 
 }
