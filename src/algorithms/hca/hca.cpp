@@ -4,76 +4,113 @@
 
 #include "hca.h"
 
-// for fd mining
-#include "dfd.h"
+algos::HCA::HCA()
+    : Primitive({"k-candidate validation"}) {
+
+}
 
 unsigned long long algos::HCA::ExecuteInternal() {
     // time
     auto start_time = std::chrono::system_clock::now();
 
-    // find all fds
-
-    fds_algorithm_.reset(new DFD());
-
-    // fds_map
-    std::map<boost::dynamic_bitset<>, boost::dynamic_bitset<>> fds;
-    for (auto const& fd : fds_algorithm_->FdList()) {
-        for (auto& [lhs, rhs] : fds) {
-            fds[lhs | fd.GetLhs().GetColumnIndices()]
-                .set(fd.GetRhs().GetIndex());
+    // get data rows
+    for (auto const& column_data : data_->GetColumnData()) {
+        for (size_t i = 0; i < column_data.GetProbingTable().size(); i++) {
+            rows_data_[i].push_back(column_data.GetProbingTableValue(i));
         }
-        fds[fd.GetLhs().GetColumnIndices()].set(fd.GetRhs().GetIndex());
     }
+
+    // fds - stores fds with 1 column lhs and 1 column rhs
+    // stores pairs of column indexes
+    std::vector<std::pair<size_t, size_t>>fds;
 
     // HCA algorithm
     std::vector<boost::dynamic_bitset<>> non_uniques(0);
+    // Single column
     for (size_t column_index = 0; column_index < schema_->GetNumColumns(); column_index++) {
         boost::dynamic_bitset<> candidate(schema_->GetNumColumns(), 0);
         candidate.set(column_index);
-        if (IsUnique(candidate)) {
+        size_t distinct = 0, freq = 0;
+        if (IsUnique(candidate, distinct, freq)) {
             RegisterUnique(Vertical(schema_, candidate));
         } else {
             non_uniques.push_back(candidate);
-            StoreHistogram(candidate);
+            // StoreFrequency
+            freq_[candidate] = freq;
+            // StoreDistinct
+            distinct_[candidate] = distinct;
         }
     }
+    // Non-single column combinations
     size_t max_k = non_uniques.size();
     for (size_t k = 2; k <= max_k; k++) {
         //  generating candidates with k columns
         auto k_candidates = CandidateGeneration(non_uniques, k - 1);
-        std::vector<bool> is_futile(k_candidates.size(), false);
         non_uniques.clear();
-        for (size_t candidate_index = 0; candidate_index < k_candidates.size(); candidate_index++) {
-            if (is_futile[candidate_index]) {
+        for (auto const& [candidate, is_futile] : k_candidates) {
+            // checking, if candidate is covered by FD pruning
+            if (is_futile) {
                 continue;
             }
-            auto const& candidate = k_candidates[candidate_index];
             if (IsPrunedByHistogram(candidate)) {
                 non_uniques.push_back(candidate);
                 continue;
             }
-            if (IsUnique(candidate)) {
+
+            size_t distinct_count = 0;
+            if (IsUnique(candidate, distinct_count)) {
                 RegisterUnique(Vertical(schema_, candidate));
-                for (size_t i = 0; i < k_candidates.size(); i++) {
-                    auto const& k_candidate = k_candidates[i];
-                    if ((fds[k_candidate] & candidate) == candidate) {
-                        RegisterUnique(Vertical(schema_, k_candidate));
-                        is_futile[i] = true;
+                // fds pruning
+                // if {AXB} is UCC and Y -> X, then {AYB} is UCC too
+                for (auto const& fd : fds) {
+                    auto pruning_candidate = candidate;
+                    pruning_candidate.set(fd.second, false);
+                    pruning_candidate.set(fd.first, true);
+                    if (pruning_candidate != candidate
+                        && (k_candidates.count(pruning_candidate) != 0
+                            && !k_candidates[pruning_candidate])) {
+                                RegisterUnique(Vertical(schema_,
+                                                                        pruning_candidate));
+                                k_candidates[pruning_candidate] = true;
                     }
                 }
             } else {
                 non_uniques.push_back(candidate);
-                for (size_t i = 0; i < k_candidates.size(); i++) {
-                    auto const& k_candidate = k_candidates[i];
-                    if ((fds[candidate] & k_candidate) == k_candidate) {
-                        non_uniques.push_back(k_candidate);
-                        is_futile[i] = true;
+                // fds pruning
+                // if {AXB} is not UCC and X -> y, then {AYB} is not UCC too
+                for (auto const& fd : fds) {
+                    auto pruning_candidate = candidate;
+                    pruning_candidate.set(fd.first, false);
+                    pruning_candidate.set(fd.second, true);
+                    if (pruning_candidate != candidate
+                        && (k_candidates.count(pruning_candidate) != 0
+                            && !k_candidates[pruning_candidate])) {
+                                non_uniques.push_back(pruning_candidate);
+                                k_candidates[pruning_candidate] = true;
                     }
                 }
-                StoreHistogram(candidate);
+                distinct_[candidate] = distinct_count;
             }
 
         }
+
+        if (k == 2) {
+            // RetrieveFDs
+            // If distinct count of X if equal to distinct count of {A, X}
+            // then X -> A
+            for (auto const& candidate : non_uniques) {
+                // separating column indexes
+                size_t f_index = candidate.find_first();
+                size_t s_index = candidate.find_next(f_index);
+                if (distinct_[boost::dynamic_bitset<>(1, 1) << f_index] == distinct_[candidate]) {
+                    fds.push_back(std::make_pair(f_index, s_index));
+                }
+                if (distinct_[boost::dynamic_bitset<>(1, 1) << s_index] == distinct_[candidate]) {
+                    fds.push_back(std::make_pair(s_index, f_index));
+                }
+            }
+        }
+
     }
 
     // return time
@@ -83,10 +120,10 @@ unsigned long long algos::HCA::ExecuteInternal() {
 
 }
 
-std::vector<boost::dynamic_bitset<>>
+std::unordered_map<boost::dynamic_bitset<>, bool>
     algos::HCA::CandidateGeneration(std::vector<boost::dynamic_bitset<>> const& non_uniques,
                                     size_t k) {
-    std::vector<boost::dynamic_bitset<>> candidates(0);
+    std::unordered_map<boost::dynamic_bitset<>, bool> candidates;
     for (size_t i = 0; i < non_uniques.size(); i++) {
         for (size_t j = i + 1; j < non_uniques.size(); j++) {
             auto const& nu1 = non_uniques[i];
@@ -107,11 +144,10 @@ std::vector<boost::dynamic_bitset<>>
             }
             if ( cnt == 2 ) {
                 boost::dynamic_bitset<> candidate(nu1 | nu2);
-
                 if (!IsMinimal(candidate)) {
                     continue;
                 }
-                candidates.push_back(candidate);
+                candidates[candidate] = false;
             }
         }
     }
@@ -127,16 +163,93 @@ bool algos::HCA::IsMinimal(boost::dynamic_bitset<> const& candidate) const {
     return true;
 }
 
-// TODO
-bool algos::HCA::IsUnique(boost::dynamic_bitset<> const& candidate) const {
-
+bool algos::HCA::IsUnique(boost::dynamic_bitset<> const& candidate,
+                          size_t& distinct_count, size_t& frequency) {
+    // Sorting table
+    std::sort(rows_data_.begin(), rows_data_.end(),
+              [&candidate] (std::vector<int> comp1, std::vector<int> comp2) {
+                  for (size_t i = candidate.find_first();
+                       i < candidate.size();
+                       i = candidate.find_next(i)) {
+                          if (comp1[i] < comp2[i]) {
+                              return true;
+                          } else if (comp1[i] > comp2[i]) {
+                              return false;
+                          }
+                  }
+                  return true;
+              });
+    // Finding distinct
+    distinct_count = 1;
+    frequency = 1;
+    size_t current_freq = 1;
+    for (size_t i = 1; i < rows_data_.size(); i++) {
+        bool are_equal = true;
+        for (size_t column_index = candidate.find_first();
+             column_index < candidate.size();
+             column_index = candidate.find_next(i)) {
+            if (rows_data_[i] != rows_data_[i - 1]) {
+                distinct_count++;
+                current_freq = 1;
+                are_equal = false;
+                break;
+            }
+        }
+        if (are_equal) {
+            current_freq++;
+        }
+        frequency = current_freq;
+    }
+    return distinct_count == rows_data_.size();
 }
 
-// TODO
+bool algos::HCA::IsUnique(boost::dynamic_bitset<> const& candidate,
+                          size_t& distinct_count) {
+    // Sorting table
+    std::sort(rows_data_.begin(), rows_data_.end(),
+              [&candidate] (std::vector<int> comp1, std::vector<int> comp2) {
+                  for (size_t i = candidate.find_first();
+                       i < candidate.size();
+                       i = candidate.find_next(i)) {
+                      if (comp1[i] < comp2[i]) {
+                          return true;
+                      } else if (comp1[i] > comp2[i]) {
+                          return false;
+                      }
+                  }
+                  return true;
+              });
+    // Finding distinct
+    distinct_count = 1;
+    for (size_t i = 1; i < rows_data_.size(); i++) {
+        for (size_t column_index = candidate.find_first();
+             column_index < candidate.size();
+             column_index = candidate.find_next(i)) {
+            if (rows_data_[i] != rows_data_[i - 1]) {
+                distinct_count++;
+                break;
+            }
+        }
+    }
+    return distinct_count == rows_data_.size();
+}
+
 bool algos::HCA::IsPrunedByHistogram(boost::dynamic_bitset<> const& candidate) const {
-
-}
-
-void algos::HCA::StoreHistogram(boost::dynamic_bitset<> const& candidate) const {
-
+    size_t cnt = 0;
+    for (int i = candidate.size() - 1; i >= 0; i--) {
+        if (candidate[i]) {
+            boost::dynamic_bitset<> comb = candidate;
+            comb.set(i, false);
+            boost::dynamic_bitset<> single_column = candidate ^ comb;
+            if (distinct_.at(comb) != 0 &&
+                    distinct_.at(comb) < freq_.at(single_column)) {
+                return true;
+            }
+            cnt++;
+        }
+        if (cnt == 2) {
+            break;
+        }
+    }
+    return false;
 }

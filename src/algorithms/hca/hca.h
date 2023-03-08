@@ -5,30 +5,36 @@
 #pragma once
 
 #include <vector>
+#include <unordered_map>
 #include <list>
+#include <memory>
 
 #include "primitive.h"
 #include "vertical.h"
 #include "relational_schema.h"
-#include "fd_algorithm.h"
+#include "column_layout_relation_data.h"
 
 namespace algos {
 
 class HCA : public Primitive {
 
 private:
-    std::unique_ptr<FDAlgorithm> fds_algorithm_;
+    std::unordered_map<boost::dynamic_bitset<>, size_t> freq_;
+    std::unordered_map<boost::dynamic_bitset<>, size_t> distinct_;
 
     RelationalSchema const* schema_;
+    ColumnLayoutRelationData const* data_;
+    std::vector<std::vector<int>> rows_data_;
 
-    std::vector<boost::dynamic_bitset<>>
+    std::unordered_map<boost::dynamic_bitset<>, bool>
         CandidateGeneration(std::vector<boost::dynamic_bitset<>> const& non_uniques, size_t k);
     bool IsMinimal(boost::dynamic_bitset<> const& candidate) const;
-    bool IsUnique(boost::dynamic_bitset<> const& candidate) const;
+    bool IsUnique(boost::dynamic_bitset<> const& candidate, size_t& distinct_count,
+                  size_t& frequency);
+    bool IsUnique(boost::dynamic_bitset<> const& candidate, size_t& distinct_count);
     bool IsPrunedByHistogram(boost::dynamic_bitset<> const& candidate) const;
-    void StoreHistogram(boost::dynamic_bitset<> const& candidate) const;
 
-    unsigned long long ExecuteInternal();
+    virtual unsigned long long ExecuteInternal() override;
 
 protected:
     std::list<Vertical> uniques_;
