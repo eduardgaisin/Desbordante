@@ -9,21 +9,18 @@
 #include <list>
 #include <memory>
 
-#include "primitive.h"
-#include "vertical.h"
+#include "ucc_algorithm.h"
 #include "relational_schema.h"
-#include "column_layout_relation_data.h"
 
 namespace algos {
 
-class HCA : public Primitive {
+class HCA : public UCCAlgorithm {
 
 private:
     std::unordered_map<boost::dynamic_bitset<>, size_t> freq_;
     std::unordered_map<boost::dynamic_bitset<>, size_t> distinct_;
 
     RelationalSchema const* schema_;
-    ColumnLayoutRelationData const* data_;
     std::vector<std::vector<int>> rows_data_;
 
     std::unordered_map<boost::dynamic_bitset<>, bool>
@@ -36,15 +33,9 @@ private:
 
     virtual unsigned long long ExecuteInternal() override;
 
-protected:
-    std::list<Vertical> uniques_;
-
 public:
     HCA();
 
-    virtual void RegisterUnique(Vertical const& column_combination) {
-        uniques_.push_back(column_combination);
-    }
 
 };
 

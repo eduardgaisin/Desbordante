@@ -2,10 +2,12 @@
 // Created by eduard on 06.03.23.
 //
 
+#include <iostream>
+
 #include "hca.h"
 
 algos::HCA::HCA()
-    : Primitive({"k-candidate validation"}) {
+    : UCCAlgorithm({"k-candidate validation"}) {
 
 }
 
@@ -13,26 +15,26 @@ unsigned long long algos::HCA::ExecuteInternal() {
     // time
     auto start_time = std::chrono::system_clock::now();
 
-    // get data rows
-    for (auto const& column_data : data_->GetColumnData()) {
+    // get data rows, need to sort
+    rows_data_ = std::vector<std::vector<int>>(GetRelation().GetNumRows(), std::vector<int>(0));
+    for (auto const& column_data : GetRelation().GetColumnData()) {
         for (size_t i = 0; i < column_data.GetProbingTable().size(); i++) {
             rows_data_[i].push_back(column_data.GetProbingTableValue(i));
         }
     }
-
     // fds - stores fds with 1 column lhs and 1 column rhs
     // stores pairs of column indexes
-    std::vector<std::pair<size_t, size_t>>fds;
+    std::vector<std::pair<size_t, size_t>> fds(0);
 
     // HCA algorithm
     std::vector<boost::dynamic_bitset<>> non_uniques(0);
     // Single column
-    for (size_t column_index = 0; column_index < schema_->GetNumColumns(); column_index++) {
-        boost::dynamic_bitset<> candidate(schema_->GetNumColumns(), 0);
+    for (size_t column_index = 0; column_index < GetRelation().GetNumColumns(); column_index++) {
+        boost::dynamic_bitset<> candidate(GetRelation().GetNumColumns(), 0);
         candidate.set(column_index);
         size_t distinct = 0, freq = 0;
         if (IsUnique(candidate, distinct, freq)) {
-            RegisterUnique(Vertical(schema_, candidate));
+            RegisterUCC(Vertical(GetRelation().GetSchema(), candidate));
         } else {
             non_uniques.push_back(candidate);
             // StoreFrequency
@@ -59,7 +61,7 @@ unsigned long long algos::HCA::ExecuteInternal() {
 
             size_t distinct_count = 0;
             if (IsUnique(candidate, distinct_count)) {
-                RegisterUnique(Vertical(schema_, candidate));
+                RegisterUCC(Vertical(GetRelation().GetSchema(), candidate));
                 // fds pruning
                 // if {AXB} is UCC and Y -> X, then {AYB} is UCC too
                 for (auto const& fd : fds) {
@@ -69,7 +71,7 @@ unsigned long long algos::HCA::ExecuteInternal() {
                     if (pruning_candidate != candidate
                         && (k_candidates.count(pruning_candidate) != 0
                             && !k_candidates[pruning_candidate])) {
-                                RegisterUnique(Vertical(schema_,
+                        RegisterUCC(Vertical(GetRelation().GetSchema(),
                                                                         pruning_candidate));
                                 k_candidates[pruning_candidate] = true;
                     }
@@ -113,11 +115,16 @@ unsigned long long algos::HCA::ExecuteInternal() {
 
     }
 
+    // debug output
+    std::cerr << "Result size: " << ucc_collection_.size() << "\n";
+    for (auto const& ucc : ucc_collection_) {
+        std::cerr << ucc.GetColumnIndices() << "\n";
+    }
+
     // return time
     auto elapsed_milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now() - start_time);
     return elapsed_milliseconds.count();
-
 }
 
 std::unordered_map<boost::dynamic_bitset<>, bool>
@@ -155,8 +162,8 @@ std::unordered_map<boost::dynamic_bitset<>, bool>
 }
 
 bool algos::HCA::IsMinimal(boost::dynamic_bitset<> const& candidate) const {
-    for (auto const& unique : uniques_) {
-        if ((candidate & unique.GetColumnIndices()) == unique.GetColumnIndices()) {
+    for (auto const& ucc : UccList()) {
+        if ((candidate & ucc.GetColumnIndices()) == ucc.GetColumnIndices()) {
             return false;
         }
     }
@@ -187,7 +194,7 @@ bool algos::HCA::IsUnique(boost::dynamic_bitset<> const& candidate,
         bool are_equal = true;
         for (size_t column_index = candidate.find_first();
              column_index < candidate.size();
-             column_index = candidate.find_next(i)) {
+             column_index = candidate.find_next(column_index)) {
             if (rows_data_[i] != rows_data_[i - 1]) {
                 distinct_count++;
                 current_freq = 1;
@@ -198,7 +205,7 @@ bool algos::HCA::IsUnique(boost::dynamic_bitset<> const& candidate,
         if (are_equal) {
             current_freq++;
         }
-        frequency = current_freq;
+        frequency = std::max(frequency, current_freq);
     }
     return distinct_count == rows_data_.size();
 }
@@ -224,7 +231,7 @@ bool algos::HCA::IsUnique(boost::dynamic_bitset<> const& candidate,
     for (size_t i = 1; i < rows_data_.size(); i++) {
         for (size_t column_index = candidate.find_first();
              column_index < candidate.size();
-             column_index = candidate.find_next(i)) {
+             column_index = candidate.find_next(column_index)) {
             if (rows_data_[i] != rows_data_[i - 1]) {
                 distinct_count++;
                 break;
