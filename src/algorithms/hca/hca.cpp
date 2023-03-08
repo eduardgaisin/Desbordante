@@ -22,6 +22,7 @@ unsigned long long algos::HCA::ExecuteInternal() {
             rows_data_[i].push_back(column_data.GetProbingTableValue(i));
         }
     }
+
     // fds - stores fds with 1 column lhs and 1 column rhs
     // stores pairs of column indexes
     std::vector<std::pair<size_t, size_t>> fds(0);
@@ -186,6 +187,13 @@ bool algos::HCA::IsUnique(boost::dynamic_bitset<> const& candidate,
                   }
                   return true;
               });
+    for (int i = 0; i < rows_data_.size(); i++) {
+        for (auto val : rows_data_[i]) {
+            std::cerr << val << " ";
+        }
+        std::cerr << "\n";
+    }
+    std::cerr << "\n";
     // Finding distinct
     distinct_count = 1;
     frequency = 1;
@@ -195,7 +203,8 @@ bool algos::HCA::IsUnique(boost::dynamic_bitset<> const& candidate,
         for (size_t column_index = candidate.find_first();
              column_index < candidate.size();
              column_index = candidate.find_next(column_index)) {
-            if (rows_data_[i] != rows_data_[i - 1]) {
+            if (rows_data_[i - 1][column_index] == 0 ||
+                    rows_data_[i][column_index] != rows_data_[i - 1][column_index]) {
                 distinct_count++;
                 current_freq = 1;
                 are_equal = false;
@@ -232,7 +241,8 @@ bool algos::HCA::IsUnique(boost::dynamic_bitset<> const& candidate,
         for (size_t column_index = candidate.find_first();
              column_index < candidate.size();
              column_index = candidate.find_next(column_index)) {
-            if (rows_data_[i] != rows_data_[i - 1]) {
+            if (rows_data_[i - 1][column_index] == 0 ||
+                    rows_data_[i][column_index] != rows_data_[i - 1][column_index]) {
                 distinct_count++;
                 break;
             }

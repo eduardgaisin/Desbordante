@@ -13,6 +13,9 @@ using UCC = Vertical;
 class UCCAlgorithm : public Primitive {
 
 private:
+    void ResetState() final {
+        ucc_collection_.clear();
+    }
     void RegisterOptions();
 
 protected:
