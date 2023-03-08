@@ -8,7 +8,7 @@
 namespace algos {
 
 using PrimitiveTypes = std::tuple<Depminer, DFD, FastFDs, FDep, Fd_mine, Pyro, Tane, FUN,
-        hyfd::HyFD, Aid, Apriori, metric::MetricVerifier, DataStats>;
+        hyfd::HyFD, Aid, Apriori, metric::MetricVerifier, DataStats, HCA>;
 
 template <typename PrimitiveBase = Primitive>
 std::unique_ptr<PrimitiveBase> CreatePrimitiveInstance(PrimitiveType primitive) {

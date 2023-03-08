@@ -31,7 +31,11 @@ BETTER_ENUM(PrimitiveType, char,
     metric,
 
 /* Statistic algorithms */
-    stats
+    stats,
+
+/* Unique column combination algorithms */
+    hca
+
 )
 // clang-format on
 
