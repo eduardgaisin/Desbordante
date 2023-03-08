@@ -12,6 +12,7 @@
 #include "algorithms/pyro.h"
 #include "algorithms/statistics/data_stats.h"
 #include "algorithms/tane.h"
+#include "algorithms/hca/hca.h"
 
 /*Association rule mining algorithms */
 #include "algorithms/association_rules/apriori.h"
