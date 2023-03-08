@@ -14,12 +14,12 @@ algos::HCA::HCA()
 unsigned long long algos::HCA::ExecuteInternal() {
     // time
     auto start_time = std::chrono::system_clock::now();
-
     // get data rows, need to sort
-    rows_data_ = std::vector<std::vector<int>>(GetRelation().GetNumRows(), std::vector<int>(0));
+    rows_data_ = std::vector<std::vector<int>>(GetRelation().GetNumRows(), std::vector<int>(GetRelation().GetNumColumns()));
     for (auto const& column_data : GetRelation().GetColumnData()) {
         for (size_t i = 0; i < column_data.GetProbingTable().size(); i++) {
-            rows_data_[i].push_back(column_data.GetProbingTableValue(i));
+            rows_data_[i][column_data.GetColumn()->GetIndex()]
+                = column_data.GetProbingTableValue(i);
         }
     }
 
@@ -117,10 +117,7 @@ unsigned long long algos::HCA::ExecuteInternal() {
     }
 
     // debug output
-    std::cerr << "Result size: " << ucc_collection_.size() << "\n";
-    for (auto const& ucc : ucc_collection_) {
-        std::cerr << ucc.GetColumnIndices() << "\n";
-    }
+    std::cerr << GetJsonUCCs() << "\n";
 
     // return time
     auto elapsed_milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -175,7 +172,7 @@ bool algos::HCA::IsUnique(boost::dynamic_bitset<> const& candidate,
                           size_t& distinct_count, size_t& frequency) {
     // Sorting table
     std::sort(rows_data_.begin(), rows_data_.end(),
-              [&candidate] (std::vector<int> comp1, std::vector<int> comp2) {
+              [&candidate] (std::vector<int> const& comp1, std::vector<int> const& comp2) {
                   for (size_t i = candidate.find_first();
                        i < candidate.size();
                        i = candidate.find_next(i)) {
@@ -185,15 +182,8 @@ bool algos::HCA::IsUnique(boost::dynamic_bitset<> const& candidate,
                               return false;
                           }
                   }
-                  return true;
+                  return false;
               });
-    for (int i = 0; i < rows_data_.size(); i++) {
-        for (auto val : rows_data_[i]) {
-            std::cerr << val << " ";
-        }
-        std::cerr << "\n";
-    }
-    std::cerr << "\n";
     // Finding distinct
     distinct_count = 1;
     frequency = 1;
@@ -223,7 +213,7 @@ bool algos::HCA::IsUnique(boost::dynamic_bitset<> const& candidate,
                           size_t& distinct_count) {
     // Sorting table
     std::sort(rows_data_.begin(), rows_data_.end(),
-              [&candidate] (std::vector<int> comp1, std::vector<int> comp2) {
+              [&candidate] (std::vector<int> const& comp1, std::vector<int> const& comp2) {
                   for (size_t i = candidate.find_first();
                        i < candidate.size();
                        i = candidate.find_next(i)) {
@@ -233,7 +223,7 @@ bool algos::HCA::IsUnique(boost::dynamic_bitset<> const& candidate,
                           return false;
                       }
                   }
-                  return true;
+                  return false;
               });
     // Finding distinct
     distinct_count = 1;
@@ -258,7 +248,7 @@ bool algos::HCA::IsPrunedByHistogram(boost::dynamic_bitset<> const& candidate) c
             boost::dynamic_bitset<> comb = candidate;
             comb.set(i, false);
             boost::dynamic_bitset<> single_column = candidate ^ comb;
-            if (distinct_.at(comb) != 0 &&
+            if (distinct_.count(comb) != 0 &&
                     distinct_.at(comb) < freq_.at(single_column)) {
                 return true;
             }
